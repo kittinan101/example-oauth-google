@@ -1,0 +1,319 @@
+openapi: 3.0.3
+info:
+  title: Google OAuth Example API
+  description: |
+    API documentation for Google OAuth 2.0 authentication implementation with Next.js.
+
+    This API demonstrates OAuth 2.0 authorization code flow with Google as the identity provider.
+
+    ## Authentication Flow
+    1. User initiates login via `/api/auth/signin/google`
+    2. User is redirected to Google for authentication
+    3. Google redirects back to `/api/auth/callback/google` with authorization code
+    4. Application exchanges code for access token
+    5. User profile is retrieved and session is created
+
+    ## Session Management
+    Sessions are managed using HTTP-only cookies for security.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://yourdomain.com
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: OAuth authentication endpoints
+  - name: User
+    description: User profile and session endpoints
+
+paths:
+  /api/auth/signin/google:
+    get:
+      tags:
+        - Authentication
+      summary: Initiate Google OAuth login
+      description: |
+        Redirects the user to Google's OAuth 2.0 authorization endpoint.
+        This starts the OAuth flow.
+      operationId: initiateGoogleLogin
+      responses:
+        '302':
+          description: Redirect to Google OAuth authorization page
+          headers:
+            Location:
+              schema:
+                type: string
+                example: https://accounts.google.com/o/oauth2/v2/auth?client_id=...
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/callback/google:
+    get:
+      tags:
+        - Authentication
+      summary: OAuth callback endpoint
+      description: |
+        Handles the OAuth callback from Google after user authentication.
+        Exchanges authorization code for access token and creates user session.
+      operationId: handleGoogleCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Authorization code from Google
+          schema:
+            type: string
+            example: 4/0AY0e-g7...
+        - name: state
+          in: query
+          required: true
+          description: State parameter for CSRF protection
+          schema:
+            type: string
+            example: eyJhbGciOiJIUzI1NiJ9...
+      responses:
+        '302':
+          description: Redirect to application home page with session cookie
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /
+            Set-Cookie:
+              schema:
+                type: string
+                example: next-auth.session-token=...; Path=/; HttpOnly; Secure; SameSite=Lax
+        '400':
+          description: Invalid request or missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: invalid_request
+                error_description: Missing authorization code
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: access_denied
+                error_description: User denied access
+
+  /api/auth/signout:
+    post:
+      tags:
+        - Authentication
+      summary: Sign out user
+      description: |
+        Clears the user session and signs out the user.
+      operationId: signOut
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                callbackUrl:
+                  type: string
+                  description: URL to redirect after sign out
+                  example: /
+      responses:
+        '200':
+          description: Successfully signed out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    example: /
+        '302':
+          description: Redirect after sign out
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /
+
+  /api/auth/session:
+    get:
+      tags:
+        - Authentication
+      summary: Get current session
+      description: |
+        Returns the current user session if authenticated, null otherwise.
+      operationId: getSession
+      responses:
+        '200':
+          description: Session data
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Session'
+                  - type: object
+                    nullable: true
+                    example: null
+              examples:
+                authenticated:
+                  summary: Authenticated user
+                  value:
+                    user:
+                      id: "123456789"
+                      name: John Doe
+                      email: john.doe@example.com
+                      image: https://lh3.googleusercontent.com/a/...
+                    expires: "2024-12-31T23:59:59.999Z"
+                unauthenticated:
+                  summary: No session
+                  value: null
+
+  /api/auth/csrf:
+    get:
+      tags:
+        - Authentication
+      summary: Get CSRF token
+      description: |
+        Returns a CSRF token for form submissions.
+      operationId: getCsrfToken
+      responses:
+        '200':
+          description: CSRF token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  csrfToken:
+                    type: string
+                    example: abc123def456...
+
+  /api/auth/providers:
+    get:
+      tags:
+        - Authentication
+      summary: Get available providers
+      description: |
+        Returns list of configured OAuth providers.
+      operationId: getProviders
+      responses:
+        '200':
+          description: List of providers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  google:
+                    $ref: '#/components/schemas/Provider'
+              example:
+                google:
+                  id: google
+                  name: Google
+                  type: oauth
+                  signinUrl: /api/auth/signin/google
+                  callbackUrl: /api/auth/callback/google
+
+components:
+  schemas:
+    Session:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        expires:
+          type: string
+          format: date-time
+          description: ISO 8601 datetime when session expires
+          example: "2024-12-31T23:59:59.999Z"
+      required:
+        - user
+        - expires
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          description: User's unique identifier from Google
+          example: "123456789"
+        name:
+          type: string
+          description: User's display name
+          example: John Doe
+        email:
+          type: string
+          format: email
+          description: User's email address
+          example: john.doe@example.com
+        image:
+          type: string
+          format: uri
+          description: URL to user's profile picture
+          example: https://lh3.googleusercontent.com/a/AATXAJyZ...
+      required:
+        - email
+
+    Provider:
+      type: object
+      properties:
+        id:
+          type: string
+          example: google
+        name:
+          type: string
+          example: Google
+        type:
+          type: string
+          enum: [oauth, email, credentials]
+          example: oauth
+        signinUrl:
+          type: string
+          example: /api/auth/signin/google
+        callbackUrl:
+          type: string
+          example: /api/auth/callback/google
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: invalid_request
+        error_description:
+          type: string
+          description: Human-readable error description
+          example: Missing required parameter
+      required:
+        - error
+
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: next-auth.session-token
+      description: |
+        Session cookie automatically set after successful authentication.
+        This is an HTTP-only cookie for security.
+
+security:
+  - sessionCookie: []
